@@ -19,8 +19,7 @@ AI-based RNNoise model and a real-time DSP chain to remove background noise for 
 3. Stop or close the fm-dx-webserver
 4. Start/Restart the fm-dx-webserver with "npm run webserver" on node.js console, check the console informations
 5. Activate the sysinfo plugin in the settings
-6. Stop or close the fm-dx-webserver
-7. Start/Restart the fm-dx-webserver with "npm run webserver" (Important for the automatic installation of the Node.js module for system information!), check the console informations on node.js console
+6. Reload the browser
 
 ## How to use:     
                                          
