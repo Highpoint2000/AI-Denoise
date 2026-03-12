@@ -1,12 +1,12 @@
 # AI-Denoise
 AI-based RNNoise model and a real-time DSP chain to remove background noise for FM-DX Webserver
 
-<img width="1446" height="832" alt="image" src="https://github.com/user-attachments/assets/23723773-30ed-469a-8cdd-41a27463c35b" />
+<img width="1697" height="856" alt="image" src="https://github.com/user-attachments/assets/3b229f33-3cf7-4314-8972-bf816a6beee4" />
 
 ## Version 1.0
 
 - RNNoise WASM neural network denoiser (VAD + soft-gate)
-- 6-band EQ, high-pass filter & brickwall limiter
+- internal automatic 6-band EQ, high-pass filter & brickwall limiter
 - Strength / Tone / Gate controls with persistent state
 - Non-destructive routing (MetricsMonitor compatible)
 - WASM & settings cached in localStorage
@@ -34,7 +34,8 @@ AI-based RNNoise model and a real-time DSP chain to remove background noise for 
 
 ## Notes: 
 
-- This plugin is only suitable for noise reduction in speech
+- This filter is only suitable for noise reduction in speech
+- When used correctly, it's possible to filter out intelligible speech even from extremely noisy environments
 - The simultaneous use of the cEQ and iMS filters must be tested individually. It can improve or worsen the result
 
 ## Contact
