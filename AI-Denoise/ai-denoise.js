@@ -2,20 +2,23 @@
 
 ///////////////////////////////////////////////////////////////
 //                                                           //
-//  AI DENOISER PLUGIN FOR FM-DX-WEBSERVER (V1.0)           //
+//  AI DENOISER PLUGIN FOR FM-DX-WEBSERVER (V1.0)            //
 //                                                           //
 //  by Highpoint                last update: 2026-03-12      //
 //                                                           //
-//  https://github.com/Highpoint2000/AI-Denoise             //
+//  https://github.com/Highpoint2000/AI-Denoise              //
+//                                                           //
+//  Uses RNNoise WASM by Shiguredo (MIT License)             //
+//  https://github.com/shiguredo/rnnoise-wasm                //
 //                                                           //
 ///////////////////////////////////////////////////////////////
 
 (() => {
     // ------------- Plugin Metadata ----------------
-    const pluginVersion    = '1.0';
-    const pluginName       = 'AI-Denoise';
+    const pluginVersion     = '1.0';
+    const pluginName        = 'AI-Denoise';
     const pluginHomepageUrl = 'https://github.com/Highpoint2000/AI-Denoise/releases';
-    const pluginUpdateUrl   = 'https://raw.githubusercontent.com/Highpoint2000/AI-Denoise/main/ai-denoise.js';
+    const pluginUpdateUrl   = 'https://raw.githubusercontent.com/Highpoint2000/AI-Denoise/refs/heads/main/AI-Denoise/ai-denoise.js';
     const CHECK_FOR_UPDATES = true;
 
     // ------------- DSP State ----------------------
@@ -32,8 +35,15 @@
 
     const CDN_ESM = 'https://cdn.jsdelivr.net/npm/@shiguredo/rnnoise-wasm@2025.1.5/dist/rnnoise.js';
 
+    // ------------- DSP Settings (persisted) ---------------
     const DEFAULTS = { strength: 0.5, voice: 0.5, gate: 0.5 };
-    const S = { ...DEFAULTS };
+
+    // Restore saved values from localStorage, fall back to DEFAULTS
+    const S = {
+        strength: parseFloat(localStorage.getItem('ai-denoise-strength') ?? DEFAULTS.strength),
+        voice:    parseFloat(localStorage.getItem('ai-denoise-voice')    ?? DEFAULTS.voice),
+        gate:     parseFloat(localStorage.getItem('ai-denoise-gate')     ?? DEFAULTS.gate),
+    };
 
     let P = {};
     function calcParams() {
@@ -62,48 +72,86 @@
     function checkUpdate() {
         const cleanUrl = pluginUpdateUrl + '?t=' + Date.now();
         fetch(cleanUrl, { cache: 'no-store' })
-            .then(r => r.text())
+            .then(r => {
+                if (!r.ok) {
+                    console.log(`[${pluginName}] Update check skipped: HTTP ${r.status}`);
+                    return null;
+                }
+                return r.text();
+            })
             .then(txt => {
+                if (!txt) return;
                 const match = txt.match(/const\s+pluginVersion\s*=\s*['"]([^'"]+)['"]/);
                 if (!match) return;
                 const remoteVer = match[1];
-                if (remoteVer !== pluginVersion) {
-                    console.log(`[${pluginName}] Update available: ${pluginVersion} -> ${remoteVer}`);
+                if (remoteVer === pluginVersion) return;
 
-                    // Add link to plugin settings page
-                    const settings = document.getElementById('plugin-settings');
-                    if (settings && !settings.innerHTML.includes(pluginHomepageUrl)) {
-                        settings.innerHTML += `<br><a href="${pluginHomepageUrl}" target="_blank">[${pluginName}] Update: ${pluginVersion} -> ${remoteVer}</a>`;
-                    }
+                console.log(`[${pluginName}] Update available: ${pluginVersion} -> ${remoteVer}`);
 
-                    // Add red dot to nav icon
-                    const navIcon =
-                        document.querySelector('.wrapper-outer #navigation .sidenav-content .fa-puzzle-piece') ||
-                        document.querySelector('.wrapper-outer .sidenav-content') ||
-                        document.querySelector('.sidenav-content');
-                    if (navIcon && !navIcon.querySelector(`.${pluginName}-update-dot`)) {
-                        const dot = document.createElement('span');
-                        dot.classList.add(`${pluginName}-update-dot`);
-                        dot.style.cssText = `
-                            display:block;width:12px;height:12px;border-radius:50%;
-                            background-color:#FE0830;margin-left:82px;margin-top:-12px;
-                        `;
-                        navIcon.appendChild(dot);
-                    }
+                // Add link to plugin settings page
+                const settings = document.getElementById('plugin-settings');
+                if (settings && !settings.innerHTML.includes(pluginHomepageUrl)) {
+                    settings.innerHTML +=
+                        `<br><a href="${pluginHomepageUrl}" target="_blank">` +
+                        `[${pluginName}] Update: ${pluginVersion} -> ${remoteVer}</a>`;
+                }
+
+                // Add red dot to nav icon
+                const navIcon =
+                    document.querySelector('.wrapper-outer #navigation .sidenav-content .fa-puzzle-piece') ||
+                    document.querySelector('.wrapper-outer .sidenav-content') ||
+                    document.querySelector('.sidenav-content');
+                if (navIcon && !navIcon.querySelector(`.${pluginName}-update-dot`)) {
+                    const dot = document.createElement('span');
+                    dot.classList.add(`${pluginName}-update-dot`);
+                    dot.style.cssText =
+                        'display:block;width:12px;height:12px;border-radius:50%;' +
+                        'background-color:#FE0830;margin-left:82px;margin-top:-12px;';
+                    navIcon.appendChild(dot);
                 }
             })
-            .catch(e => console.warn(`[${pluginName}] Update check failed`, e));
+            .catch(e => console.log(`[${pluginName}] Update check failed:`, e.message));
     }
     if (CHECK_FOR_UPDATES) checkUpdate();
 
     // ==========================================
-    // 1. Load RNNoise
+    // 1. Load RNNoise (with localStorage cache)
     // ==========================================
     async function loadRNNoise() {
         if (rnnoiseObj) return true;
+        const CACHE_KEY     = 'ai-denoise-rnnoise-cache';
+        const CACHE_VER_KEY = 'ai-denoise-rnnoise-version';
+        const CACHE_VERSION = '2025.1.5';
+
         try {
-            console.log(`[${pluginName}] Loading RNNoise:`, CDN_ESM);
-            const mod  = await import(/* webpackIgnore: true */ CDN_ESM);
+            let moduleUrl = CDN_ESM;
+
+            // Check if a valid cached version exists in localStorage
+            const cachedVersion = localStorage.getItem(CACHE_VER_KEY);
+            const cachedCode    = localStorage.getItem(CACHE_KEY);
+
+            if (cachedVersion === CACHE_VERSION && cachedCode) {
+                console.log(`[${pluginName}] Loading RNNoise from cache`);
+                const blob = new Blob([cachedCode], { type: 'application/javascript' });
+                moduleUrl  = URL.createObjectURL(blob);
+            } else {
+                console.log(`[${pluginName}] Downloading RNNoise:`, CDN_ESM);
+                const resp = await fetch(CDN_ESM, { cache: 'force-cache' });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const code = await resp.text();
+                try {
+                    localStorage.setItem(CACHE_KEY,     code);
+                    localStorage.setItem(CACHE_VER_KEY, CACHE_VERSION);
+                    console.log(`[${pluginName}] RNNoise cached in localStorage`);
+                } catch (storageErr) {
+                    // localStorage might be full – continue without caching
+                    console.warn(`[${pluginName}] Could not cache RNNoise:`, storageErr.message);
+                }
+                const blob = new Blob([code], { type: 'application/javascript' });
+                moduleUrl  = URL.createObjectURL(blob);
+            }
+
+            const mod  = await import(/* webpackIgnore: true */ moduleUrl);
             rnnoiseObj = await mod.Rnnoise.load();
             FRAME_SIZE    = rnnoiseObj.frameSize;
             denoiseState1 = rnnoiseObj.createDenoiseState();
@@ -287,6 +335,9 @@
     // 5. Routing
     // ==========================================
     function connectPipeline() {
+        // Keep sourceNode connected to native destination so other plugins (e.g. MetricsMonitor) keep working
+        sourceNode.connect(nativeCtx.destination);
+        // Route through the AI DSP chain
         sourceNode.connect(nodes.hpf);
         nodes.hpf.connect(nodes.streamDest);
         nodes48.streamSrc.connect(nodes48.processor);
@@ -298,17 +349,33 @@
         nodes48.eqHigh.connect(nodes48.eqAir);
         nodes48.eqAir.connect(nodes48.limiter);
         nodes48.limiter.connect(nodes48.outDest);
+        // Mute direct sourceNode->destination so only AI output is heard
+        if (!nodes.directGain) {
+            nodes.directGain = nativeCtx.createGain();
+            nodes.directGain.gain.value = 0; // Silent - AI output takes over
+        }
+        try { sourceNode.disconnect(nativeCtx.destination); } catch (_) {}
+        sourceNode.connect(nodes.directGain);
+        nodes.directGain.connect(nativeCtx.destination);
+        // Route AI-processed output to destination
         nodes.outSrc.connect(nativeCtx.destination);
     }
 
     function disconnectAll() {
-        [sourceNode, nodes.hpf, nodes.streamDest, nodes.outSrc]
+        // Restore direct (audible) connection before disconnecting
+        try { nodes.directGain?.disconnect(); } catch (_) {}
+        nodes.directGain = null;
+
+        [nodes.hpf, nodes.streamDest, nodes.outSrc]
             .forEach(n => { try { n?.disconnect(); } catch (_) {} });
         [nodes48.streamSrc, nodes48.processor,
          nodes48.eqPresence, nodes48.eqClarity, nodes48.eqLow,
          nodes48.eqMid, nodes48.eqHigh, nodes48.eqAir,
          nodes48.limiter, nodes48.outDest]
             .forEach(n => { try { n?.disconnect(); } catch (_) {} });
+
+        // sourceNode stays connected to destination for other plugins
+        try { sourceNode.connect(nativeCtx.destination); } catch (_) {}
     }
 
     function toggleDSP() {
@@ -436,12 +503,16 @@
             font-size: 12px;
             font-family: sans-serif;
             transition: all 0.3s;
-            background-color: #dc3545;
-            color: #fff;
+            background-color: #4da6ff;
+            color: #000;
         }
         #ai-denoise-onoff-btn.active {
-            background-color: #4da6ff !important;
-            color: #000 !important;
+            background-color: #dc3545 !important;
+            color: #fff !important;
+        }
+        #ai-denoise-onoff-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
         }
         #ai-denoise-reset-btn {
             width: 100%;
@@ -518,13 +589,21 @@
     function bindSlider(id, key, valId) {
         const sl  = document.getElementById(id);
         const val = document.getElementById(valId);
+
+        // Apply restored value to slider UI on startup
+        const pct0 = Math.round(S[key] * 100);
+        sl.value      = S[key];
+        val.innerText = pct0 + '%';
+        sl.style.background = `linear-gradient(to right,#4da6ff ${pct0}%,#333 0%)`;
+
         sl.addEventListener('input', () => {
             const v   = parseFloat(sl.value);
             S[key]    = v;
             const pct = Math.round(v * 100);
             val.innerText = pct + '%';
-            sl.style.background =
-                `linear-gradient(to right,#4da6ff ${pct}%,#333 0%)`;
+            sl.style.background = `linear-gradient(to right,#4da6ff ${pct}%,#333 0%)`;
+            // Persist to localStorage
+            localStorage.setItem(`ai-denoise-${key}`, v);
             calcParams();
             applyEQ();
         });
@@ -536,24 +615,26 @@
     // On/Off button inside overlay
     document.getElementById('ai-denoise-onoff-btn').addEventListener('click', () => {
         if (!rnnoiseObj) { alert('AI is still loading, please wait.'); return; }
+        const streamActive = (typeof Stream !== 'undefined' && !!Stream);
+        if (!streamActive) { alert('Please start playback first.'); return; }
         isEnabled = !isEnabled;
         toggleDSP();
     });
 
-    // Reset button
+    // Reset button – also clears persisted values
     document.getElementById('ai-denoise-reset-btn').addEventListener('click', () => {
         Object.assign(S, DEFAULTS);
-        [['ai-sl-strength','strength','ai-strength-val'],
-         ['ai-sl-voice',   'voice',   'ai-voice-val'],
-         ['ai-sl-gate',    'gate',    'ai-gate-val']
+        [['ai-sl-strength', 'strength', 'ai-strength-val'],
+         ['ai-sl-voice',    'voice',    'ai-voice-val'],
+         ['ai-sl-gate',     'gate',     'ai-gate-val']
         ].forEach(([slId, key, valId]) => {
             const sl  = document.getElementById(slId);
             const val = document.getElementById(valId);
             const pct = Math.round(S[key] * 100);
             sl.value      = S[key];
             val.innerText = pct + '%';
-            sl.style.background =
-                `linear-gradient(to right,#4da6ff ${pct}%,#333 0%)`;
+            sl.style.background = `linear-gradient(to right,#4da6ff ${pct}%,#333 0%)`;
+            localStorage.setItem(`ai-denoise-${key}`, S[key]);
         });
         calcParams(); applyEQ();
     });
@@ -569,12 +650,21 @@
     // 10. Toggle Button State
     // ==========================================
     function updateToggleBtn(error) {
-        const btn = document.getElementById('ai-denoise-onoff-btn');
+        const btn    = document.getElementById('ai-denoise-onoff-btn');
+        const navBtn = document.getElementById('Denoiser-on-off');
         if (!btn) return;
+
+        // Color toolbar icon red when AI is active
+        const icon = navBtn ? navBtn.querySelector('i') : null;
+        if (icon) {
+            icon.style.color = (isEnabled && !error) ? '#FE0830' : '';
+        }
+
         if (error) {
             btn.textContent = 'Error loading AI';
             btn.style.backgroundColor = '#ff4444';
             btn.style.color = '#fff';
+            btn.disabled = false;
             btn.classList.remove('active');
             return;
         }
@@ -582,14 +672,33 @@
             btn.textContent = 'Loading AI...';
             btn.style.backgroundColor = '#ffc107';
             btn.style.color = '#000';
+            btn.disabled = true;
             btn.classList.remove('active');
             return;
         }
+
+        // Check if stream is playing
+        const streamActive = (typeof Stream !== 'undefined' && !!Stream);
+        if (!streamActive) {
+            btn.textContent = 'Start playback first';
+            btn.style.backgroundColor = '#555';
+            btn.style.color = '#aaa';
+            btn.disabled = true;
+            btn.classList.remove('active');
+            if (icon) icon.style.color = '';
+            return;
+        }
+
+        btn.disabled = false;
         if (isEnabled) {
             btn.textContent = 'AI ON';
+            btn.style.backgroundColor = '';
+            btn.style.color = '';
             btn.classList.add('active');
         } else {
             btn.textContent = 'AI OFF';
+            btn.style.backgroundColor = '';
+            btn.style.color = '';
             btn.classList.remove('active');
         }
     }
@@ -635,8 +744,7 @@
         const obs = new MutationObserver((_, o) => {
             if (typeof addIconToPluginPanel === 'function') {
                 found = true; o.disconnect();
-                // 'waveform-lines' as AI/audio icon
-                addIconToPluginPanel(btnId, 'Denoiser', 'solid', 'waveform-lines',
+                addIconToPluginPanel(btnId, 'Denoiser', 'solid', 'wand-magic-sparkles',
                     `AI Denoiser v${pluginVersion}`);
 
                 const btnObs = new MutationObserver((_, o2) => {
@@ -667,6 +775,9 @@
     // 13. Start
     // ==========================================
     loadRNNoise();
-    setInterval(checkAndHookAudio, 1000);
+    setInterval(() => {
+        checkAndHookAudio();
+        updateToggleBtn(); // Check every second whether the stream is active
+    }, 1000);
 
 })();

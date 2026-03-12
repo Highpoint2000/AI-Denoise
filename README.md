@@ -1,2 +1,44 @@
 # AI-Denoise
 AI-based RNNoise model and a real-time DSP chain to remove background noise for FM-DX Webserver
+
+<img width="1446" height="832" alt="image" src="https://github.com/user-attachments/assets/23723773-30ed-469a-8cdd-41a27463c35b" />
+
+## Version 1.0
+
+- RNNoise WASM neural network denoiser (VAD + soft-gate)
+- 6-band EQ, high-pass filter & brickwall limiter
+- Strength / Tone / Gate controls with persistent state
+- Non-destructive routing (MetricsMonitor compatible)
+- WASM & settings cached in localStorage
+- Uses RNNoise WASM by Shiguredo (MIT License) https://github.com/shiguredo/rnnoise-wasm  
+
+## Installation notes:
+
+1. [Download](https://github.com/Highpoint2000/AI-Denoise/releases) the last repository as a zip
+2. Unpack all files from the plugins folder to ..fm-dx-webserver-main\plugins\ 
+3. Stop or close the fm-dx-webserver
+4. Start/Restart the fm-dx-webserver with "npm run webserver" on node.js console, check the console informations
+5. Activate the sysinfo plugin in the settings
+6. Stop or close the fm-dx-webserver
+7. Start/Restart the fm-dx-webserver with "npm run webserver" (Important for the automatic installation of the Node.js module for system information!), check the console informations on node.js console
+
+## How to use:     
+                                         
+- Click the AI toolbar button to open the control panel  
+- Start audio playback first, then click AI ON          
+- Strength: controls denoising intensity                
+- Tone: warm (left) to bright (right) sound character    
+- Gate: open (subtle) to tight (aggressive) gating       
+- Red toolbar icon = AI denoiser is active               
+- Panel position and settings are saved automatically
+
+## Notes: 
+
+- This plugin is only suitable for noise reduction in speech
+- The simultaneous use of the cEQ and iMS filters must be tested individually. It can improve or worsen the result
+
+## Contact
+
+If you have any questions, would like to report problems, or have suggestions for improvement, please feel free to contact me! You can reach me by email at highpoint2000@googlemail.com. I look forward to hearing from you!
+
+<a href="https://www.buymeacoffee.com/Highpoint" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
