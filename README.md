@@ -1,7 +1,7 @@
 # AI-Denoise
 AI-based RNNoise model and a real-time DSP chain to remove background noise for FM-DX Webserver
 
-<img width="1697" height="856" alt="image" src="https://github.com/user-attachments/assets/3b229f33-3cf7-4314-8972-bf816a6beee4" />
+
 
 ## Version 1.1
 
